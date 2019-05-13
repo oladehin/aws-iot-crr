@@ -1,0 +1,162 @@
+#
+# AWS IoT Replication Library Sample CloudFormation Template for Active-Passive/Disaster Recovery
+# for AWS IoT. This template will
+# deploy the latest version of the lambda functions on github/S3 to each of the target regions
+#
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  #DynamoDB Settings for Thing Registry Events
+  IotRegistryEventDynamoDbTableName:
+    Type: "String"
+    Default: "IotThingEventsTable"
+    Description: "IoT Thing Registry Events are persisted to a DynamoDB enabled for Global Tables"
+  IotRegistryEventDynamoDbReadUnits:
+    Type: "Number"
+    Default: 10
+    Description: "Read Capacity Units for Thing Registry Table"
+  IotRegistryEventDynamoDbWriteUnits:
+    Type: "Number"
+    Default: 10
+    Description: "Write Capacity Units for Thing Registry Table"
+
+Resources:
+
+  #This IoT Rule replicates each Thing Registry Event to the IoT Registry Events Table
+  IotThingEventReplicationRule:
+    Type: AWS::IoT::TopicRule
+    Properties:
+      RuleName: "IotThingEventReplicationRule"
+      TopicRulePayload:
+        Description: "AWS IoT Rule that forwards registry events to DynamoDB to replicate across region"
+        AwsIotSqlVersion: "2016-03-23"
+        RuleDisabled: false
+        Sql: "SELECT * FROM '$aws/events/thing/+/+'"
+        Actions:
+          - DynamoDBv2:
+              PutItem:
+                TableName: !Ref IotRegistryEventDynamoDbTableName
+              RoleArn: !GetAtt [ IotDynamoDBReplicationRole, Arn ]
+  IotThingTypeAssociationEventReplicationRule:
+    Type: AWS::IoT::TopicRule
+    Properties:
+      RuleName: "IotThingTypeAssociationEventReplicationRule"
+      TopicRulePayload:
+        Description: "AWS IoT Rule that forwards registry events to DynamoDB to replicate across region"
+        AwsIotSqlVersion: "2016-03-23"
+        RuleDisabled: false
+        Sql: "SELECT * FROM '$aws/events/thingTypeAssociation/thing/+/+'"
+        Actions:
+          - DynamoDBv2:
+              PutItem:
+                TableName: !Ref IotRegistryEventDynamoDbTableName
+              RoleArn: !GetAtt [ IotDynamoDBReplicationRole, Arn ]
+
+  #This IoT Rule replicates each Thing Type Registry Event to the IoT Registry Events Table
+  IotThingTypeEventReplicationRule:
+    Type: AWS::IoT::TopicRule
+    Properties:
+      RuleName: "IotThingTypeEventReplicationRule"
+      TopicRulePayload:
+        Description: "AWS IoT Rule that forwards registry events to DynamoDB to replicate across region"
+        AwsIotSqlVersion: "2016-03-23"
+        RuleDisabled: false
+        Sql: "SELECT * FROM '$aws/events/thingType/+/+'"
+        Actions:
+          - DynamoDBv2:
+              PutItem:
+                TableName: !Ref IotRegistryEventDynamoDbTableName
+              RoleArn: !GetAtt [ IotDynamoDBReplicationRole, Arn ]
+
+  #This IoT Rule replicates each Thing Group Registry Event to the IoT Registry Events Table
+  IotThingGroupEventReplicationRule:
+    Type: AWS::IoT::TopicRule
+    Properties:
+      RuleName: "IotThingGroupEventReplicationRule"
+      TopicRulePayload:
+        Description: "AWS IoT Rule that forwards registry events to DynamoDB to replicate across region"
+        AwsIotSqlVersion: "2016-03-23"
+        RuleDisabled: false
+        Sql: "SELECT * FROM '$aws/events/thingGroup/+/+'"
+        Actions:
+          - DynamoDBv2:
+              PutItem:
+                TableName: !Ref IotRegistryEventDynamoDbTableName
+              RoleArn: !GetAtt [ IotDynamoDBReplicationRole, Arn ]
+  IotThingGroupHierarchyEventReplicationRule:
+    Type: AWS::IoT::TopicRule
+    Properties:
+      RuleName: "IotThingGroupHierarchyEventReplicationRule"
+      TopicRulePayload:
+        Description: "AWS IoT Rule that forwards registry events to DynamoDB to replicate across region"
+        AwsIotSqlVersion: "2016-03-23"
+        RuleDisabled: false
+        Sql: "SELECT * FROM '$aws/events/thingGroupHierarchy/thingGroup/+/+/+/+'"
+        Actions:
+          - DynamoDBv2:
+              PutItem:
+                TableName: !Ref IotRegistryEventDynamoDbTableName
+              RoleArn: !GetAtt [ IotDynamoDBReplicationRole, Arn ]
+  IotThingGroupMembershipEventReplicationRule:
+    Type: AWS::IoT::TopicRule
+    Properties:
+      RuleName: "IotThingGroupMembershipEventReplicationRule"
+      TopicRulePayload:
+        Description: "AWS IoT Rule that forwards registry events to DynamoDB to replicate across region"
+        AwsIotSqlVersion: "2016-03-23"
+        RuleDisabled: false
+        Sql: "SELECT * FROM '$aws/events/thingGroupMembership/thingGroup/+/+/+/+'"
+        Actions:
+          - DynamoDBv2:
+              PutItem:
+                TableName: !Ref IotRegistryEventDynamoDbTableName
+              RoleArn: !GetAtt [ IotDynamoDBReplicationRole, Arn ]
+
+  #IoT Policies for assuming a role through the Rules Engine and putting
+  #data items in DynamoDB
+  IotDynamoDBReplicationRole:
+   Type: AWS::IAM::Role
+   Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - iot.amazonaws.com
+            Action:
+              - sts:AssumeRole
+  IoTRolePolicies:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: IoTReplicationRoleDynamoDB_Policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - dynamodb:PutItem
+            Resource:
+              - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${IotRegistryEventDynamoDbTableName}'
+      Roles: [{ Ref: IotDynamoDBReplicationRole }]
+
+  #DynamoDB Tables for Replicating Thing, Thing Type, and Thing Group Events
+  IotRegistryEventTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName: !Ref IotRegistryEventDynamoDbTableName
+      AttributeDefinitions:
+      - AttributeName: "eventId"
+        AttributeType: S
+      - AttributeName: "timestamp"
+        AttributeType: N
+      KeySchema:
+      - AttributeName: "eventId"
+        KeyType: HASH
+      - AttributeName: "timestamp"
+        KeyType: RANGE
+      ProvisionedThroughput:
+        ReadCapacityUnits: !Ref IotRegistryEventDynamoDbReadUnits
+        WriteCapacityUnits: !Ref IotRegistryEventDynamoDbWriteUnits
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES

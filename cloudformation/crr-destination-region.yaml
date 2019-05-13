@@ -1,0 +1,256 @@
+#
+# AWS IoT Replication Library Sample CloudFormation Template for Active-Passive/Disaster Recovery
+# for AWS IoT. This template will
+# deploy the latest version of the lambda functions on github/S3 to each of the target regions
+#
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  #DynamoDB Settings for Thing Registry Events
+  IotRegistryEventDynamoDbTableName:
+    Type: "String"
+    Default: "IotThingEventsTable"
+    Description: "IoT Thing Registry Events are persisted to a DynamoDB enabled for Global Tables"
+  IotRegistryEventDynamoDbReadUnits:
+    Type: "Number"
+    Default: 10
+    Description: "Read Capacity Units for Thing Registry Table"
+  IotRegistryEventDynamoDbWriteUnits:
+    Type: "Number"
+    Default: 10
+    Description: "Write Capacity Units for Thing Registry Table"
+  LambdaS3Bucket:
+    Type: "String"
+    Default: "aws-iot-crr-destination"
+  RegistryReplicationFunctionS3Key:
+    Type: "String"
+    Default: "thing-registry-replication-function-0.1-SNAPSHOT-lambda.jar"
+    Description: "Thing Registry Replication Function Location on S3"
+
+
+Type: "AWS::Lambda::Function"
+Properties:
+
+  Environment:
+    Environment
+  FunctionName: String
+  Handler: String
+  KmsKeyArn: String
+  MemorySize: Integer
+  ReservedConcurrentExecutions: Integer
+  Role: String
+  Runtime: String
+  Timeout: Integer
+  TracingConfig:
+    TracingConfig
+  VpcConfig:
+    VPCConfig
+  Tags:
+    Resource Tag
+
+Resources:
+  RegistryReplicationFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        S3Bucket: !Ref LambdaS3JitrSourceCodeBucket
+        S3Key: !Ref ActivateCertificateFunctionS3Key
+      Handler: index.handler
+      Role:
+        Fn::GetAtt: [ LambdaRole , Arn ]
+      Tags: 
+      Description: ""
+      Handler: 'com.ooladehin.awsiot.certregistration.main.ActivateCertificateFunction::handleRequest'
+      Runtime: 'java8'
+      MemorySize: 1024
+      Timeout: 15
+      Environment:
+        Variables:
+          IOT_SOURCE_REGION: !Ref "AWS::Region"
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: LambdaRolePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              Resource: arn:aws:logs:*:*:*
+            - Effect: Allow
+              Action:
+              - dynamodb:DescribeStream
+              - dynamodb:GetRecords
+              - dynamodb:GetShardIterator
+              - dynamodb:ListStreams
+              Resource: "*"
+  DataTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+      StreamSpecification:
+        StreamViewType: NEW_IMAGE
+  DataTableStream:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      BatchSize: 1
+      Enabled: True
+      EventSourceArn:
+        Fn::GetAtt: [ DataTable , StreamArn ]
+      FunctionName:
+        Fn::GetAtt: [ EchoFunction , Arn ]
+      StartingPosition: LATEST
+
+# Kinesis Streams for each event record
+ThingReplicationStream:
+  Type: "AWS::Kinesis::Stream"
+  Properties:
+    ShardCount: 1
+ThingTypeReplicationStream:
+  Type: "AWS::Kinesis::Stream"
+  Properties:
+    ShardCount: 1
+ThingGroupReplicationStream:
+  Type: "AWS::Kinesis::Stream"
+  Properties:
+    ShardCount: 1
+DestinationKinesisStream:
+  Type: "AWS::Kinesis::Stream"
+  Properties:
+    ShardCount: 1
+    Name: !Ref DestinationKinesisStreamName
+MessageRouterIoTFunction:
+  Type: AWS::Serverless::Function
+  Properties:
+    Handler: 'com.ooladehin.awsiot.crr.registration.RegistryMessageRouterFunction::handleRequest'
+    Runtime: 'java8'
+    MemorySize: 1024
+    Timeout: 15
+    Policies:
+      - AWSLambdaKinesisExecutionRole
+      - Version: '2012-10-17' # Policy Document
+        Statement:
+          - Effect: Allow
+            Action:
+              - kinesis:PutRecord
+              - iot:*
+            Resource: "*"
+    Environment:
+      Variables:
+        IOT_SOURCE_REGION: !Ref DestinationIoTRegion
+        THING_EVENT_STREAMNAME : !Ref ThingReplicationStream
+        THINGTYPE_EVENT_STREAMNAME: !Ref ThingTypeReplicationStream
+        THINGGROUP_EVENT_STREAMNAME: !Ref ThingGroupReplicationStream
+    CodeUri:
+      Bucket: !Ref ReplicationBucket
+      Key: !Ref MessageRouterFunctionS3Key
+    Events:
+      Stream:
+        Type: Kinesis
+        Properties:
+          Stream: !GetAtt DestinationKinesisStream.Arn
+          BatchSize: 100
+          StartingPosition: TRIM_HORIZON
+ThingGroupReplicationFunction:
+  Type: 'AWS::Serverless::Function'
+  Properties:
+    Handler: 'com.ooladehin.awsiot.crr.registration.ReplicateThingGroupFunction::handleRequest'
+    Runtime: 'java8'
+    MemorySize: 1024
+    Timeout: 15
+    CodeUri:
+      Bucket: !Ref ReplicationBucket
+      Key: !Ref ThingGroupReplicationFunctionS3Key
+    Environment:
+      Variables:
+        IOT_SOURCE_REGION: !Ref DestinationIoTRegion
+    Policies:
+      - AWSLambdaKinesisExecutionRole
+      - Version: '2012-10-17' # Policy Document -- Permissive until final IoT policies are created during beta
+        Statement:
+          - Effect: Allow
+            Action:
+              - iot:*
+            Resource: "*"
+    Events:
+      Stream:
+        Type: Kinesis
+        Properties:
+          Stream: !GetAtt ThingGroupReplicationStream.Arn
+          StartingPosition: TRIM_HORIZON
+ThingTypeReplicationFunction:
+  Type: 'AWS::Serverless::Function'
+  Properties:
+    Handler: 'com.ooladehin.awsiot.crr.registration.ReplicateThingTypeFunction::handleRequest'
+    Runtime: 'java8'
+    MemorySize: 1024
+    Timeout: 59
+    CodeUri:
+      Bucket: !Ref ReplicationBucket
+      Key: !Ref ThingTypeReplicationFunctionS3Key
+    Environment:
+      Variables:
+        IOT_SOURCE_REGION: !Ref DestinationIoTRegion
+    Policies:
+      - AWSLambdaKinesisExecutionRole
+      - Version: '2012-10-17' # Policy Document -- Permissive until final IoT policies are created during beta
+        Statement:
+          - Effect: Allow
+            Action:
+              - iot:*
+            Resource: "*"
+    Events:
+      Stream:
+        Type: Kinesis
+        Properties:
+          Stream: !GetAtt ThingTypeReplicationStream.Arn
+          StartingPosition: TRIM_HORIZON
+ThingReplicationFunction:
+  Type: 'AWS::Serverless::Function'
+  Properties:
+    Handler: 'com.ooladehin.awsiot.crr.registration.ReplicateThingFunction::handleRequest'
+    Runtime: 'java8'
+    MemorySize: 1024
+    Timeout: 59
+    CodeUri:
+      Bucket: !Ref ReplicationBucket
+      Key: !Ref ThingReplicationFunctionS3Key
+    Environment:
+        Variables:
+          IOT_SOURCE_REGION: !Ref DestinationIoTRegion
+    Policies:
+      - AWSLambdaKinesisExecutionRole
+      - Version: '2012-10-17' # Policy Document -- Permissive until final IoT policies are created during beta
+        Statement:
+          - Effect: Allow
+            Action:
+              - iot:*
+            Resource: "*"
+    Events:
+      Stream:
+        Type: Kinesis
+        Properties:
+          Stream: !GetAtt ThingReplicationStream.Arn
+          StartingPosition: TRIM_HORIZON

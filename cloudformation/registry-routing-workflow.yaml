@@ -1,0 +1,383 @@
+AWSTemplateFormatVersion : '2010-09-09'
+Description: Sample template to test JITR
+
+Parameters:
+  LambdaS3JitrSourceCodeBucket:
+    Type: "String"
+    Default: "aws-iot-registry-router-workflow"
+    Description: "The destination S3 location for lambda functions"
+  PersistEventFunctionS3Key:
+    Type: "String"
+    Default: "persist-event-function-0.1-SNAPSHOT-lambda.jar"
+  IoTRoutingRegistryStateMachineRuleName:
+    Type: "String"
+    Default: "IoTRegistryReplicationWorkflowRule"
+    Description: "IoT Registry Replication Workflow"
+  JitrStateMachineName:
+    Type: "String"
+    Default: "IoTRegistryReplicationWorkflow"
+    Description: "IoT Registry Replication Workflow"
+  RegistryTableName:
+    Type: "String"
+    Default: "CaCertificateTable"
+  DeviceCertificateTableName:
+    Type: "String"
+    Default: "DeviceCertificateTable"
+
+Resources:
+
+  ##################################
+  # AWS IoT Resources
+  ##################################
+
+  IoTJitrPolicy:
+    Type: AWS::IoT::Policy
+    Properties:
+      PolicyName: !Ref IoTGlobalPolicyName
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Action: "iot:*"
+            Resource: "*"
+
+  # IoTJitrPolicy:
+  #   Type: AWS::IoT::Policy
+  #   Properties:
+  #     PolicyName: !Ref IoTGlobalPolicyName
+  #     PolicyDocument:
+  #       Version: "2012-10-17"
+  #       Statement:
+  #         - Effect: "Allow"
+  #           Action:
+  #             - "iot:Connect"
+  #           Resource:
+  #             - arn:aws:iot:us-east1:123456789012:client/myClientId
+  #             - !Sub 'arn:aws:iot:${AWS::Region}:${AWS::AccountId}:client/${iot:Connection.Thing.ThingName}'
+  IoTJitrStateMachineRule:
+    Type: AWS::IoT::TopicRule
+    Properties:
+      RuleName: !Ref IoTStateMachineRuleName
+      TopicRulePayload:
+        Description: "AWS IoT JITR Workflow"
+        AwsIotSqlVersion: "2016-03-23"
+        RuleDisabled: false
+        Sql: "SELECT * FROM '$aws/events/certificates/registered/+'"
+        Actions:
+          - StepFunctions:
+              ExecutionNamePrefix: "JustInTimeRegistration"
+              RoleArn: !GetAtt 'IotRuleJitrRole.Arn'
+              StateMachineName: !Ref JitrStateMachineName
+  IotRuleJitrRole:
+   Type: AWS::IAM::Role
+   Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - iot.amazonaws.com
+            Action:
+              - sts:AssumeRole
+  IoTRoleJitrPolicies:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: IoTJitrRuleStepFunctions_Policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - states:StartExecution
+            Resource: "*"
+      Roles: [{ Ref: IotRuleJitrRole }]
+
+  ##################################
+  # AWS Lambda Functions for Jitr
+  ##################################
+  ActivateCertificateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: 'com.ooladehin.awsiot.certregistration.main.ActivateCertificateFunction::handleRequest'
+      Runtime: 'java8'
+      MemorySize: 1024
+      Timeout: 15
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - iot:*
+              Resource: "*"
+      Environment:
+        Variables:
+          IOT_SOURCE_REGION: !Ref "AWS::Region"
+      CodeUri:
+        Bucket: !Ref LambdaS3JitrSourceCodeBucket
+        Key: !Ref ActivateCertificateFunctionS3Key
+  AttachCertificateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: 'com.ooladehin.awsiot.certregistration.main.AttachCertificateFunction::handleRequest'
+      Runtime: 'java8'
+      MemorySize: 1024
+      Timeout: 15
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - iot:*
+              Resource: "*"
+      Environment:
+        Variables:
+          IOT_SOURCE_REGION: !Ref "AWS::Region"
+      CodeUri:
+        Bucket: !Ref LambdaS3JitrSourceCodeBucket
+        Key: !Ref AttachCertificateFunctionS3Key
+  AttachPolicyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: 'com.ooladehin.awsiot.certregistration.main.AttachIotPolicyFunction::handleRequest'
+      Runtime: 'java8'
+      MemorySize: 1024
+      Timeout: 15
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - iot:*
+              Resource: "*"
+      Environment:
+        Variables:
+          IOT_SOURCE_REGION: !Ref "AWS::Region"
+          IOT_GLOBAL_POLICY: !Ref IoTGlobalPolicyName
+      CodeUri:
+        Bucket: !Ref LambdaS3JitrSourceCodeBucket
+        Key: !Ref AttachPolicyFunctionS3Key
+  CreateThingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: 'com.ooladehin.awsiot.certregistration.main.CreateThingFunction::handleRequest'
+      Runtime: 'java8'
+      MemorySize: 1024
+      Timeout: 15
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - iot:*
+              Resource: "*"
+      Environment:
+        Variables:
+          IOT_SOURCE_REGION: !Ref "AWS::Region"
+      CodeUri:
+        Bucket: !Ref LambdaS3JitrSourceCodeBucket
+        Key: !Ref CreateThingFunctionS3Key
+  ParseCertificateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: 'com.ooladehin.awsiot.certregistration.main.ParseCertificateFunction::handleRequest'
+      Runtime: 'java8'
+      MemorySize: 1024
+      Timeout: 15
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - iot:*
+              Resource: "*"
+      Environment:
+        Variables:
+          IOT_SOURCE_REGION: !Ref "AWS::Region"
+      CodeUri:
+        Bucket: !Ref LambdaS3JitrSourceCodeBucket
+        Key: !Ref ParseCertificateFunctionS3Key
+  StoreCertificateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: 'com.ooladehin.awsiot.certregistration.main.StoreCertificateStatusFunction::handleRequest'
+      Runtime: 'java8'
+      MemorySize: 1024
+      Timeout: 15
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - iot:*
+                - dynamodb:*
+              Resource: "*"
+      Environment:
+        Variables:
+          IOT_SOURCE_REGION: !Ref "AWS::Region"
+          CACERT_TABLE_NAME: !Ref CaCertificateTableName
+          CERT_TABLE_NAME: !Ref DeviceCertificateTableName
+      CodeUri:
+        Bucket: !Ref LambdaS3JitrSourceCodeBucket
+        Key: !Ref StoreCertificateFunctionS3Key
+
+  ##################################
+  # =Just In Time Registration State Machine
+  ##################################
+  JustInTimeRegistrationStateMachine:
+    Type: 'AWS::StepFunctions::StateMachine'
+
+    Properties:
+      StateMachineName: !Ref JitrStateMachineName
+      DefinitionString: !Sub |
+        {
+           "Comment":"Registering an IoT Device Using Step Functions",
+           "StartAt":"ParseCertificate",
+           "States":{
+              "ParseCertificate":{
+                 "Type":"Task",
+                 "Resource":"${ParseCertificateFunction.Arn}",
+                 "Catch":[{
+                       "ErrorEquals":[
+                          "States.ALL"
+                       ],
+                       "ResultPath":"$.CertificatParsingError",
+                       "Next":"Fail"
+                 }],
+                 "Next":"ActivateCertificate"
+              },
+              "ActivateCertificate":{
+                 "Type":"Task",
+                 "Resource":"${ActivateCertificateFunction.Arn}",
+                 "Catch":[{
+                       "ErrorEquals":[
+                          "States.ALL"
+                       ],
+                       "ResultPath":"$.ActivatCertificateError",
+                       "Next":"Fail"
+                 }],
+                 "Next":"AttachIotPolicy"
+              },
+              "AttachIotPolicy":{
+                 "Type":"Task",
+                 "Resource":"${AttachPolicyFunction.Arn}",
+                 "Catch":[{
+                       "ErrorEquals":[
+                          "States.ALL"
+                       ],
+                       "ResultPath":"$.AttachPolicyError",
+                       "Next":"Fail"
+                  }],
+                 "Next":"CreateThing"
+              },
+              "CreateThing":{
+                 "Type":"Task",
+                 "Resource":"${CreateThingFunction.Arn}",
+                 "Catch":[{
+                       "ErrorEquals":[
+                          "States.ALL"
+                       ],
+                       "ResultPath":"$.CreateThingError",
+                       "Next":"Fail"
+                  }],
+                 "Next":"AttachPrincipal"
+              },
+               "AttachPrincipal":{
+                 "Type":"Task",
+                 "Resource":"${AttachCertificateFunction.Arn}",
+                 "Catch":[{
+                       "ErrorEquals":[
+                          "States.ALL"
+                       ],
+                       "ResultPath":"$.AttachPrincipalError",
+                       "Next":"Fail"
+                  }],
+                 "Next":"ReplicateCertificate"
+              },"ReplicateCertificate":{
+                 "Type":"Task",
+                 "Resource":"${StoreCertificateFunction.Arn}",
+                 "Catch":[{
+                       "ErrorEquals":[
+                          "States.ALL"
+                       ],
+                       "ResultPath":"$.ReplicateCertificateError",
+                       "Next":"Fail"
+                  }],
+                 "End":true
+              },
+              "Fail":{
+                 "Type":"Fail"
+              }
+           }
+        }
+      RoleArn: !GetAtt 'JustInTimeStepFunctionsIamRole.Arn'
+
+  # Step Functions IAM role
+  JustInTimeStepFunctionsIamRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: !Sub 'states.${AWS::Region}.amazonaws.com'
+          Action: 'sts:AssumeRole'
+      Policies:
+      - PolicyName: lambda
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action: 'lambda:InvokeFunction'
+            Resource:
+            - !GetAtt 'ParseCertificateFunction.Arn'
+            - !GetAtt 'ActivateCertificateFunction.Arn'
+            - !GetAtt 'AttachPolicyFunction.Arn'
+            - !GetAtt 'CreateThingFunction.Arn'
+            - !GetAtt 'StoreCertificateFunction.Arn'
+            - !GetAtt 'AttachCertificateFunction.Arn'
+  CaCertRegistryTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName: !Ref CaCertificateTableName
+      AttributeDefinitions:
+        - AttributeName: "caCertificateId"
+          AttributeType: S
+        - AttributeName: "globalCaCertificateId"
+          AttributeType: S
+      KeySchema:
+        - AttributeName: "caCertificateId"
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 20
+        WriteCapacityUnits: 20
+      GlobalSecondaryIndexes:
+        - IndexName: "caCertificatGlobalIndex"
+          KeySchema:
+            - AttributeName: "globalCaCertificateId"
+              KeyType: "HASH"
+          Projection:
+            NonKeyAttributes:
+              - "caCertificateId"
+              - "certificatePem"
+            ProjectionType: "INCLUDE"
+          ProvisionedThroughput:
+            ReadCapacityUnits: 20
+            WriteCapacityUnits: 20
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+  DeviceCertRegistryTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName: !Ref DeviceCertificateTableName
+      AttributeDefinitions:
+      - AttributeName: "deviceCertificateId"
+        AttributeType: S
+      KeySchema:
+      - AttributeName: "deviceCertificateId"
+        KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 20
+        WriteCapacityUnits: 20
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES

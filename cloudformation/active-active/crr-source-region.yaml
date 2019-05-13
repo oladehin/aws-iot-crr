@@ -1,0 +1,123 @@
+# AWS IoT Replication Library Sample CloudFormation Template. This template will
+# deploy the latest version of the lambda functions on github/S3 to each of the target regions
+#
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Parameters:
+  DestinationKinesisStreamName:
+    Type: "String"
+    Default: "IoTRegistryEventDestination"
+    Description: "The destination kinesis stream that is used to move changes from one region to another"
+  DestinationIoTRegion:
+    Type: "String"
+    Default: "us-west-2"
+    Description: "The destination region where the device registry data is replicated"
+  ReplicationBucket:
+    Type: "String"
+    Default: "aws-iot-crr"
+    Description: "The source region where the device registry data is replicated"
+  ReplicationLambdaFunctionKey:
+    Type: "String"
+    Default: "region-replication-library-0.1-SNAPSHOT-lambda.jar"
+    Description: "The destination region where the device registry data is replicated"
+Resources:
+  #This IoT Rule creates a kinesis stream that replicates data between
+  #This source region and the destination region
+  IoTReplicationThingKinesisRule:
+    Type: AWS::IoT::TopicRule
+    Properties:
+      RuleName: "IoTCrrThingKinesisRule"
+      TopicRulePayload:
+        Description: "AWS IoT Rule that forwards registry events to Kinesis to replicate across region"
+        AwsIotSqlVersion: "2016-03-23"
+        RuleDisabled: false
+        Sql: "SELECT * FROM '$aws/events/#' WHERE topic(3) = 'thing' OR topic(3) = 'thingGroup' OR topic(3) = 'thingType' OR topic(3) = 'thingTypeAssociation' OR topic(3) = 'thingGroupMembership' OR topic(3) = 'thingGroupHierarchy'"
+        Actions:
+          - Kinesis:
+              PartitionKey: "${topic(4)}"
+              StreamName: !Ref IoTRegistrySourceKinesisStream
+              RoleArn: !GetAtt [ IoTRegistryEventRuleKinesisRole, Arn ]
+  IoTRegistryEventRuleKinesisRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - iot.amazonaws.com
+            Action:
+              - sts:AssumeRole
+  IoTRolePolicies:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: IoTKinesisRegistryEventRole_Policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: Allow
+            Action:
+              - kinesis:PutRecord
+            Resource: !GetAtt [ IoTRegistrySourceKinesisStream, Arn ]
+      Roles: [{ Ref: IoTRegistryEventRuleKinesisRole }]
+  IoTRegistrySourceKinesisStream:
+    Type: "AWS::Kinesis::Stream"
+    Properties:
+      ShardCount: 1
+  IoTReplicationLambdaFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      Handler: 'com.ooladehin.awsiot.crr.replication.CrossRegionLambdaForwarderFunction::handleRequest'
+      Runtime: 'java8'
+      MemorySize: 1024
+      Timeout: 59
+      CodeUri:
+        Bucket: !Ref ReplicationBucket
+        Key: !Ref ReplicationLambdaFunctionKey
+      Environment:
+        Variables:
+          DESTINATION_STREAM_NAME: !Ref DestinationKinesisStreamName
+          DESTINATION_STREAM_REGION: !Ref DestinationIoTRegion
+          DESTINATION_CONNECTION_TIMEOUT: 10000
+          DESTINATION_SOCKET_TIMEOUT: 60000
+      Role: !GetAtt [ IoTRegistryReplicationLambdaRole, Arn ]
+      Events:
+        Stream:
+          Type: Kinesis
+          Properties:
+            Stream: !GetAtt IoTRegistrySourceKinesisStream.Arn
+            StartingPosition: TRIM_HORIZON
+  IoTRegistryReplicationLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+  LambdaRolePolicies:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: IoTRegistryCRR_Policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: Allow
+            Action:
+                - kinesis:DescribeStream
+                - kinesis:GetRecords
+                - kinesis:GetShardIterator
+                - kinesis:ListStreams
+                - kinesis:PutRecord
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+            Resource: "*"
+      Roles: [{ Ref: IoTRegistryReplicationLambdaRole }]
