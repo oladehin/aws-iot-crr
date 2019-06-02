@@ -44,6 +44,13 @@ public class ReplicateRegistryFunction implements RequestHandler<DynamodbEvent, 
         this.certificateEventService = new CertificateEventService(this.awsIoTClient);
     }
 
+    /****
+     * Primary Lambda Function handler which loops through DynamoDB Streams and 
+     * processes the event in the target region
+     * 
+     * @param ddbEvent
+     * @param context
+     */
     public Void handleRequest(DynamodbEvent ddbEvent, final Context context) {
     	LambdaLogger logger = context.getLogger();
     	
@@ -69,31 +76,41 @@ public class ReplicateRegistryFunction implements RequestHandler<DynamodbEvent, 
 
     	switch (eventTypeEnum) {
 	        case THING:  
-				logger.log("Processing Thing Request:" + dynamoStreamRecord.toString());
+				logger.log("Processing Thing Request: " + dynamoStreamRecord.toString());
 				this.thingEventService.processThingEvent(dynamoStreamRecord);
 	            break;
 	        case THING_GROUP:
-	        	logger.log("Processing Thing Group Request:" + dynamoStreamRecord.toString());
+	        	logger.log("Processing Thing Group Request: " + dynamoStreamRecord.toString());
 				this.thingGroupEventService.processGroupEvent(dynamoStreamRecord);
 	            break;
 	        case THING_GROUP_MEMBERSHIP: 
-	        	logger.log("Processing Thing Group Membeship Request:" + dynamoStreamRecord.toString());
+	        	logger.log("Processing Thing Group Membeship Request: " + dynamoStreamRecord.toString());
 				this.thingGroupEventService.processGroupMembershipEvent(dynamoStreamRecord);
 	            break;
 	        case THING_TYPE:  
-	        	logger.log("Processing Thing Type Request:" + dynamoStreamRecord.toString());
+	        	logger.log("Processing Thing Type Request: " + dynamoStreamRecord.toString());
 				this.thingTypeEventService.processThingTypeEvent(dynamoStreamRecord);
 	            break;
 	        case THING_TYPE_ASSOCIATION:  
-	        	logger.log("Processing Thing Type Association Request:" + dynamoStreamRecord.toString());
+	        	logger.log("Processing Thing Type Association Request: " + dynamoStreamRecord.toString());
 				this.thingTypeEventService.processThingTypeAssociationEvent(dynamoStreamRecord);
 	            break;
 	        case CERTIFICATE:
-	        	logger.log("Processing Certificate Request:" + dynamoStreamRecord.toString());
+	        	logger.log("Processing Certificate Request: " + dynamoStreamRecord.toString());
 				this.certificateEventService.processCertificateEvent(dynamoStreamRecord, logger);
-	            break;        	
+	            break;
+	        default:
+	        	logger.log("Unable to process IoT Event Record: " + dynamoStreamRecord.toString());
+	        	break;        	
     	}
     }
+    
+    /****
+     * Since this implementation uses Global Tables, the logic always checks if the DynamoDB update was
+     * created from its own region and if so it can safely ignore it.
+     * @param dynamoStreamRecord
+     * @return
+     */
 	private boolean shouldBeReplicated(Map<String, AttributeValue> dynamoStreamRecord) {
 		String updateRegion = dynamoStreamRecord.get(GLOBAL_TABLE_UPDATEREGION).getS();
 		if(updateRegion.equalsIgnoreCase(IOT_TARGET_REGION)) {

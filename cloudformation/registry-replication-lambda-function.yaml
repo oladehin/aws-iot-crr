@@ -1,0 +1,74 @@
+AWSTemplateFormatVersion : '2010-09-09'
+Description: "The Lambda function that is responsible for reading from registry events
+              and replaying the actions in AWS IoT Registry"
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+
+  ##################################
+  # Lambda Input Parameters
+  ##################################
+  LambdaS3ReplicationSourceCodeBucket:
+    Type: "String"
+    Default: "aws-iot-replication-workflow"
+    Description: "The destination S3 location for the lambda function used for replication in the standy region"
+  ReplicateFunctionS3Key:
+    Type: "String"
+    Default: "replicate-registry-event-function-0.1-SNAPSHOT-lambda.jar"
+
+  ##################################
+  # DynamoDB Input Parameters
+  ##################################
+
+  RegistryEventTableName:
+    Type: "String"
+    Default: "RegistryEvents"
+
+Resources:
+
+  ##################################
+  # AWS Lambda Functions for Registry Workflow
+  ##################################
+
+  RoutingRegistryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: 'com.ooladehin.awsiot.registry.main.RoutingRegistryFunction::handleRequest'
+      Runtime: 'java8'
+      MemorySize: 512
+      Timeout: 15
+      Policies: AWSLambdaDynamoDBExecutionRole
+      Events:
+        Stream:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt RegistryEventTable.StreamArn
+            BatchSize: 100
+            StartingPosition: TRIM_HORIZON
+      Environment:
+        Variables:
+          IOT_SOURCE_REGION: !Ref "AWS::Region"
+      CodeUri:
+        Bucket: !Ref LambdaS3ReplicationSourceCodeBucket
+        Key: !Ref ReplicateFunctionS3Key
+ 
+
+  ##################################
+  # Registry DynamoDB Database
+  ##################################
+
+  RegistryEventTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName: !Ref RegistryEventTableName
+      AttributeDefinitions:
+      - AttributeName: "eventId"
+        AttributeType: S
+      KeySchema:
+      - AttributeName: "eventId"
+        KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 20
+        WriteCapacityUnits: 20
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES

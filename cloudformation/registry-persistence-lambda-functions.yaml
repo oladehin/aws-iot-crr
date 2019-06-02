@@ -1,5 +1,6 @@
 AWSTemplateFormatVersion : '2010-09-09'
-Description: Sample template to test JITR
+Description: "A combination of IoT Rules Engine, DynamoDB, Step Functions to migrate IoT Events from one region to a second region"
+Transform: AWS::Serverless-2016-10-31
 
 Parameters:
 
@@ -8,15 +9,16 @@ Parameters:
   ##################################
   LambdaS3RegistrySourceCodeBucket:
     Type: "String"
-    Default: "aws-iot-registry-workflow"
-    Description: "The destination S3 location for lambda functions"
+    Description: "The source S3 location for lambda functions"
   RoutingFunctionS3Key:
     Type: "String"
-    Default: "TBD"
+    Default: "routing-registry-function-0.1-SNAPSHOT-lambda.jar"
+    Description: "Determines whether a Registry Event should be forwarded 
+                  to the other region. By default all events are forwarded in an active/passive manner"
   PersistFunctionS3Key:
     Type: "String"
-    Default: "TBD"
-    Description: "Thing Type Replication Function Location on S3"
+    Default: "persist-event-function-0.1-SNAPSHOT-lambda.jar"
+    Description: "Persists the underlying event into the global tables data store"
 
   ##################################
   # DynamoDB Input Parameters
@@ -34,9 +36,9 @@ Parameters:
     Type: "String"
     Default: "RegistryCertificateWorkflow"
     Description: "IoT Registry Workflow"
-  RegistryEventStateMachineName:
+  RegistryRoutingStateMachineName:
     Type: "String"
-    Default: "JitrCertificateWorkflow"
+    Default: "RegistryPersistenceStateMachine"
     Description: "IoT Registry Replication Workflow"
 
 Resources:
@@ -58,7 +60,7 @@ Resources:
           - StepFunctions:
               ExecutionNamePrefix: "IotRegistryEvent"
               RoleArn: !GetAtt 'IotRuleRegistryEventWorkflowRole.Arn'
-              StateMachineName: !Ref RegistryEventStateMachineName
+              StateMachineName: !Ref RegistryRoutingStateMachineName
   IotRuleRegistryEventWorkflowRole:
    Type: AWS::IAM::Role
    Properties:
