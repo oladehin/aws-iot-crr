@@ -47,10 +47,3 @@ DynamoDB will recognize that this table has been created and already enabled and
  ![img/destination-yaml.png](img/existing-dynamodb-table.png)
 
 With all systems in place, you can test the replication of your IoT Registry by selecting your source region, then selecting AWS IoT. From here you can create Things, Groups, or Thing Types and those values will be replicated to your destination region. In addition you can associate Things to Thing Types or Things to Thing Groups and those associations are also replicated across region. 
-
-# Bugs / Limitations
-* This code currently does not replicate IoT policies or certificates. This could be added using JITP/JITR and BYOC. Any control plane changes to policies are not captured today through from the registry events.If you wish to implement you'll need to:
-
-   1) Create an IoT rule that listens for JITR events
-   2) Once the event is received push the event to a replication stream in the other region
-   3) For any secondary region you will need to use BYOC mapping the CA cert in that region with the CA in the source region.
