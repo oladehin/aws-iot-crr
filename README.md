@@ -34,8 +34,6 @@ In your CloudFormation template, you will need to enter at a minimum the S3 buck
 
 8) Next navigate to your destination region you are using for replication and deploy the second CloudFormation file named `registry-replication-lambda-function.yaml`, also located in the cloudformation folder of the project, into the destination region. This CloudFormation Template deploys a single Lambda Function that will listen to the DynamoDB Global Tables and apply the changes to your destination region. It is important that your DynamoDB Table name used in this region is identical to the field used in the source region.
 
- ![img/destination-yaml.png](img/destination-yaml.png)
-
 9) Once both regions have been configured, the last step before testing the replication is to enable Global Tables. The benefit of enabling Global Tables is that AWS is automatically take care of replicating the data from our source region to our destination region. Go to DynamoDB in either the source or destination region, select the DynamoDB table that you created using the cross region CloudFormation template, then select the Global Tables table, then select "Add region", and select the region where your other DynamoDB table is deployed. 
 
  ![img/destination-yaml.png](img/add-dynamodb-region.png)
