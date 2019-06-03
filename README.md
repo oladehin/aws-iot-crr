@@ -1,6 +1,4 @@
-![img/aws_new_logo.png](img/aws_new_logo.png)
-
-Cross Region Replication for IoT Registry
+Cross Region Replication for AWS IoT Core Registry
 by Olawale Oladehin (oladehin@amazon.com)
 
 This version is only for proof of concept.
